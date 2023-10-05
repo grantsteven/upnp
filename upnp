@@ -1,0 +1,171 @@
+PCAP:
+|198.199.109.203|GET|/rootDesc.xml|Mozilla/5.0 zgrab/0.x|HTTP/1.1|- Standard Request.|74.192.165.112
+1675098049.22987|Host: 74.192.165.112:8080
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0
+Accept: */*
+Accept-Language: en-US,en;q=0.5
+Connection: close
+Accept-Encoding: gzip
+Connection: close
+
+Universal Plug and Play(Upnp) is a service that is advertised through Simple Service Delivery Protocol(SSDP) on UDP
+port 1900. Upon broadcasting to the network in search of listening SSDP ports using miranda, the following results are shown.
+****************************************************************
+SSDP reply message from 10.0.0.1:56688
+XML file is located at http://10.0.0.1:56688/rootDesc.xml
+Device is running Unspecified, UPnP/1.0, Unspecified
+****************************************************************
+This messages shows us that Upnp is enabled on the network's gateway. You can see the file that is available has the same name
+as the file requested by the bad actor. After running the following commands in Miranda we can see a list of actions available through Upnp
+
+upnp> host list
+
+        [5] 10.0.0.1:56688
+
+upnp> host info 5 deviceList WANConnectionDevice services WANIPConnection actions
+
+AddPortMapping : {}
+GetNATRSIPStatus : {}
+GetGenericPortMappingEntry : {}
+GetSpecificPortMappingEntry : {}
+ForceTermination : {}
+GetExternalIPAddress : {}
+GetConnectionTypeInfo : {}
+GetStatusInfo : {}
+SetConnectionType : {}
+DeletePortMapping : {}
+RequestConnection : {} 
+
+We are most interested in AddPortMapping. This action allows any device on the network to forward ports to any device on the network without admin access to the router. here is an example using miranda. A screenshot of the result is also attached.
+
+
+upnp> host send 5 WANConnectionDevice WANIPConnection AddPortMapping
+
+Required argument:
+        Argument Name:  NewPortMappingDescription
+        Data Type:      string
+        Allowed Values: []
+        Set NewPortMappingDescription value to: test
+
+Required argument:
+        Argument Name:  NewLeaseDuration
+        Data Type:      ui4
+        Allowed Values: []
+        Set NewLeaseDuration value to: 0
+
+Required argument:
+        Argument Name:  NewInternalClient
+        Data Type:      string
+        Allowed Values: []
+        Set NewInternalClient value to: 10.0.0.21
+
+Required argument:
+        Argument Name:  NewEnabled
+        Data Type:      boolean
+        Allowed Values: []
+        Set NewEnabled value to: 1
+
+Required argument:
+        Argument Name:  NewExternalPort
+        Data Type:      ui2
+        Allowed Values: []
+        Set NewExternalPort value to: 60000
+
+Required argument:
+        Argument Name:  NewRemoteHost
+        Data Type:      string
+        Allowed Values: []
+        Set NewRemoteHost value to: 
+
+Required argument:
+        Argument Name:  NewProtocol
+        Data Type:      string
+        Allowed Values: ['TCP', 'UDP']
+        Set NewProtocol value to: TCP
+
+Required argument:
+        Argument Name:  NewInternalPort
+        Data Type:      ui2
+        Allowed Values: []
+        Set NewInternalPort value to: 60000
+
+
+You can eliminate this attack vector by simply disabling Upnp on your router. While most InternetGatewayDevices are configured correctly, they can be misconfigured to listen on their internet facing interface and expose these services to the world. However even with a correctly configured internet gateway, Upnp can still be exploited after an intitial compromise allowing for more complex attacks on the network. This illustrates the importance of strict firewall rules. 
+	Below I have my iptable rules that are in place on my honeypot. These rules will limit new outbound connections to only that of isc.sans.edu and www4.dshield.org. The problem arises when the ip address for these domains change. The honeypot is set to send out data to these domains via a cron job every 30 minutes. I have written a shell script that will also execute every 30 minutes via cron, one minute before fwlogparser.py and weblogsubmit.py executes. This script will delete all iptable rules that allow for web connections to be made, then creates new ones with updated ip addresses for the hard coded domain names. 
+	These are my first three cron jobs. I have attached my iptab.sh.
+
+06,36 * * * * root /home/pi/iptab.sh
+07,37 * * * * root cd /srv/dshield; ./weblogsubmit.py ; sleep 10; ./webpy.sh
+07,37 * * * * root /srv/dshield/fwlogparser.py
+
+
+
+
+$ > sudo iptables-save
+
+iptables -t nat -A PREROUTING -i eth0 -m pkttype --pkt-type multicast -j RETURN
+iptables -t nat -A PREROUTING -d 255.255.255.255/32 -i eth0 -j RETURN
+iptables -t nat -A PREROUTING -s 192.168.4.0/24 -i eth0 -j RETURN
+iptables -t nat -A PREROUTING -s 192.168.4.123/32 -i eth0 -j RETURN
+iptables -t nat -A PREROUTING -i eth0 -m state --state INVALID,NEW -j DSHIELDLOG
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 22 -j REDIRECT --to-ports 2222
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 23 -j REDIRECT --to-ports 2223
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 2323 -j REDIRECT --to-ports 2223
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 8000
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 8080 -j REDIRECT --to-ports 8000
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 7547 -j REDIRECT --to-ports 8000
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 5555 -j REDIRECT --to-ports 8000
+iptables -t nat -A PREROUTING -p tcp -m tcp --dport 9000 -j REDIRECT --to-ports 8000
+iptables -t nat -A DSHIELDLOG -s 10.0.0.0/8 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 100.64.0.0/10 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 127.0.0.0/8 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 169.254.0.0/16 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 172.16.0.0/12 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 192.0.0.0/24 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 192.0.2.0/24 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 192.168.0.0/16 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 224.0.0.0/4 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 240.0.0.0/4 -j RETURN
+iptables -t nat -A DSHIELDLOG -s 255.255.255.255/32 -j RETURN
+iptables -t nat -A DSHIELDLOG -j LOG --log-prefix " DSHIELDINPUT "
+iptables -t nat -A DSHIELDLOG -j RETURN
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -p icmp -m icmp --icmp-type 8 -j ACCEPT
+iptables -A INPUT -p icmp -m icmp --icmp-type 0 -j ACCEPT
+iptables -A INPUT -s 192.168.4.0/24 -i wlan0 -p tcp -m tcp --dport 2222 -j REJECT --reject-with icmp-port-unreachable
+iptables -A INPUT -s 192.168.4.0/24 -i wlan0 -p tcp -m tcp --dport 2223 -j REJECT --reject-with icmp-port-unreachable
+iptables -A INPUT -s 192.168.4.0/24 -i wlan0 -p tcp -m tcp --dport 8000 -j REJECT --reject-with icmp-port-unreachable
+iptables -A INPUT -s 192.168.4.123/32 -i wlan0 -p tcp -m tcp --dport 2222 -j REJECT --reject-with icmp-port-unreachable
+iptables -A INPUT -s 192.168.4.123/32 -i wlan0 -p tcp -m tcp --dport 2223 -j REJECT --reject-with icmp-port-unreachable
+iptables -A INPUT -s 192.168.4.123/32 -i wlan0 -p tcp -m tcp --dport 8000 -j REJECT --reject-with icmp-port-unreachable
+iptables -A INPUT -s 192.168.4.123/32 -d 192.168.4.34/32 -i wlan0 -p tcp -m tcp --dport 12222 -j ACCEPT
+iptables -A INPUT -s 10.0.0.1/32 -d 10.0.0.21/32 -i eth0 -p udp -m udp --sport 53 -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --dport 2222 -j ACCEPT
+iptables -A INPUT -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --dport 2223 -j ACCEPT
+iptables -A INPUT -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --dport 8000 -j ACCEPT
+iptables -A INPUT -s 45.60.31.34/32 -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --sport 443 -m state --state ESTABLISHED -m comment --comment "isc.sans.edu1" -j ACCEPT
+iptables -A INPUT -s 45.60.31.34/32 -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --sport 80 -m state --state ESTABLISHED -m comment --comment "isc.sans.edu1" -j ACCEPT
+iptables -A INPUT -s 45.60.103.34/32 -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --sport 443 -m state --state ESTABLISHED -m comment --comment "isc.sans.edu2" -j ACCEPT
+iptables -A INPUT -s 45.60.103.34/32 -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --sport 80 -m state --state ESTABLISHED -m comment --comment "isc.sans.edu2" -j ACCEPT
+iptables -A INPUT -s 159.223.154.178/32 -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --sport 443 -m state --state ESTABLISHED -m comment --comment "www4.dshield.org0" -j ACCEPT
+iptables -A INPUT -s 159.223.154.178/32 -d 10.0.0.21/32 -i eth0 -p tcp -m tcp --sport 80 -m state --state ESTABLISHED -m comment --comment "www4.dshield.org0" -j ACCEPT
+iptables -A INPUT -j DROP
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -p icmp -m icmp --icmp-type 8 -j ACCEPT
+iptables -A OUTPUT -p icmp -m icmp --icmp-type 0 -j ACCEPT
+iptables -A OUTPUT -s 192.168.4.34/32 -d 192.168.4.123/32 -o wlan0 -p tcp -m state --state ESTABLISHED -m tcp --sport 12222 -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 10.0.0.1/32 -o eth0 -p udp -m udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -o eth0 -p tcp -m tcp --sport 2222 -m state --state ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -o eth0 -p tcp -m tcp --sport 2223 -m state --state ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -o eth0 -p tcp -m tcp --sport 8000 -m state --state ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 45.60.31.34/32 -o eth0 -p tcp -m tcp --dport 443 -m comment --comment "isc.sans.edu1" -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 45.60.31.34/32 -o eth0 -p tcp -m tcp --dport 80 -m comment --comment "isc.sans.edu1" -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 45.60.103.34/32 -o eth0 -p tcp -m tcp --dport 443 -m comment --comment "isc.sans.edu2" -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 45.60.103.34/32 -o eth0 -p tcp -m tcp --dport 80 -m comment --comment "isc.sans.edu2" -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 159.223.154.178/32 -o eth0 -p tcp -m tcp --dport 443 -m comment --comment "www4.dshield.org0" -j ACCEPT
+iptables -A OUTPUT -s 10.0.0.21/32 -d 159.223.154.178/32 -o eth0 -p tcp -m tcp --dport 80 -m comment --comment "www4.dshield.org0" -j ACCEPT
+iptables -A OUTPUT -j DROP
